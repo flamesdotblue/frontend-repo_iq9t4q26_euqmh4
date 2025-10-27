@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Maximize, Shield, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Maximize, Shield, XCircle, Send } from 'lucide-react';
 
-const initialQuestions = [
+const fallbackQuestions = [
   {
     id: 'q1',
     type: 'mcq',
@@ -24,7 +24,6 @@ const initialQuestions = [
     starter: 'function add(a, b) {\n  // your code here\n}',
     test: (code) => {
       try {
-        // quick validation without eval: simple includes check
         return code.includes('function add') && code.includes('a') && code.includes('b') && (code.includes('a + b') || code.includes('return a+b') || code.includes('return a + b'));
       } catch {
         return false;
@@ -34,17 +33,22 @@ const initialQuestions = [
   },
 ];
 
-export default function UserExam() {
+export default function UserExam({ candidate, exam }) {
+  const questions = useMemo(() => exam?.questions ?? fallbackQuestions, [exam]);
+  const durationSec = useMemo(() => (exam?.duration ? Math.max(1, parseInt(exam.duration)) * 60 : 12 * 60), [exam]);
   const [started, setStarted] = useState(false);
-  const [duration] = useState(12 * 60); // seconds
-  const [remaining, setRemaining] = useState(12 * 60);
+  const [remaining, setRemaining] = useState(durationSec);
   const [warnings, setWarnings] = useState(0);
   const [blocked, setBlocked] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [answers, setAnswers] = useState({});
   const timerRef = useRef(null);
 
-  const totalScore = useMemo(() => initialQuestions.reduce((a, q) => a + (q.score || 1), 0), []);
+  useEffect(() => {
+    setRemaining(durationSec);
+  }, [durationSec]);
+
+  const totalScore = useMemo(() => questions.reduce((a, q) => a + (q.score || 1), 0), [questions]);
 
   useEffect(() => {
     function onVisibility() {
@@ -55,9 +59,7 @@ export default function UserExam() {
       if (!started || submitted) return;
       handleViolation('Window focus lost');
     }
-    function onFocus() {
-      // optional feedback on returning
-    }
+    function onFocus() {}
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
@@ -91,7 +93,7 @@ export default function UserExam() {
 
   function startExam() {
     setStarted(true);
-    setRemaining(duration);
+    setRemaining(durationSec);
     enterFullscreen();
   }
 
@@ -112,11 +114,18 @@ export default function UserExam() {
 
   function computeScore() {
     let score = 0;
-    for (const q of initialQuestions) {
+    for (const q of questions) {
       const a = answers[q.id];
       if (q.type === 'mcq' && typeof a === 'number' && a === q.answer) score += q.score;
       if (q.type === 'short' && typeof a === 'string' && a.trim().toLowerCase() === (q.answerText || '').toLowerCase()) score += q.score;
-      if (q.type === 'code' && typeof a === 'string' && q.test && q.test(a)) score += q.score;
+      if (q.type === 'code' && typeof a === 'string') {
+        if (q.test && typeof q.test === 'function') {
+          if (q.test(a)) score += q.score;
+        } else {
+          // Basic heuristic if no test provided
+          if (a.trim().length > 0) score += Math.min(q.score, 1);
+        }
+      }
     }
     return score;
   }
@@ -126,8 +135,7 @@ export default function UserExam() {
     if (document.fullscreenElement && document.exitFullscreen) {
       document.exitFullscreen();
     }
-    // Normally send to backend; here we just mark submitted
-    console.info('Auto-submitted:', { reason, answers });
+    console.info('Auto-submitted:', { reason, answers, candidate, exam });
   }
 
   function submitNow() {
@@ -141,16 +149,31 @@ export default function UserExam() {
           <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
             <div className="flex items-center gap-2">
               <Shield className="text-indigo-600" size={18} />
-              <h2 className="font-semibold">User Exam Mode</h2>
+              <h2 className="font-semibold">{exam?.title || 'User Exam Mode'} {candidate?.name ? `• ${candidate.name}` : ''}</h2>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Clock size={16} className="text-slate-500" />
-              <span className={`font-mono ${remaining <= 60 ? 'text-red-600' : 'text-slate-800'}`}>{formatTime(remaining)}</span>
+            <div className="flex items-center gap-3 text-sm">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-slate-500" />
+                <span className={`${remaining <= 60 ? 'text-red-600' : 'text-slate-800'} font-mono`}>{formatTime(remaining)}</span>
+              </div>
+              <button
+                onClick={submitNow}
+                disabled={!started || submitted}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md ${!started || submitted ? 'bg-slate-100 text-slate-400' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+              >
+                <Send size={16}/> Submit
+              </button>
             </div>
           </div>
 
           {!started && !submitted && (
             <div className="p-6">
+              {exam?.instructions && (
+                <div className="mb-4 text-sm text-slate-700">
+                  <div className="font-medium">Instructions</div>
+                  <p className="text-slate-600 mt-1">{exam.instructions}</p>
+                </div>
+              )}
               <div className="rounded-lg border border-dashed p-6 text-center">
                 <p className="text-slate-700">This demo enforces full-screen and tracks tab switches and focus loss.</p>
                 <p className="text-slate-500 text-sm mt-1">Two warnings; the third violation blocks and auto-submits.</p>
@@ -166,7 +189,7 @@ export default function UserExam() {
 
           {started && !submitted && (
             <div className="p-6 space-y-6">
-              {initialQuestions.map((q, idx) => (
+              {questions.map((q, idx) => (
                 <div key={q.id} className="p-4 rounded-lg border bg-white">
                   <div className="flex items-start justify-between">
                     <h3 className="font-medium text-slate-900">Q{idx + 1}. {q.question}</h3>
@@ -239,11 +262,11 @@ export default function UserExam() {
                 <div className="text-2xl font-bold text-slate-900">{warnings}</div>
                 <div className="text-xs text-slate-500">Warnings</div>
               </div>
-              <div className={`p-3 rounded-lg ${blocked ? 'bg-red-50' : 'bg-slate-50'}`}>
+              <div className={`${blocked ? 'bg-red-50' : 'bg-slate-50'} p-3 rounded-lg`}>
                 <div className={`text-2xl font-bold ${blocked ? 'text-red-600' : 'text-slate-900'}`}>{blocked ? 'Yes' : 'No'}</div>
                 <div className="text-xs text-slate-500">Blocked</div>
               </div>
-              <div className={`p-3 rounded-lg ${submitted ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+              <div className={`${submitted ? 'bg-emerald-50' : 'bg-slate-50'} p-3 rounded-lg`}>
                 <div className={`text-2xl font-bold ${submitted ? 'text-emerald-700' : 'text-slate-900'}`}>{submitted ? 'Yes' : 'No'}</div>
                 <div className="text-xs text-slate-500">Submitted</div>
               </div>

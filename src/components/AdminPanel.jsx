@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FileInput, FileSpreadsheet, ListChecks, Upload, Users, Eye, AlertTriangle, Download } from 'lucide-react';
+import { FileInput, FileSpreadsheet, ListChecks, Upload, Users, Eye, AlertTriangle, Download, Pencil, Trash2, Save, X, Send, Copy } from 'lucide-react';
 
 const sampleResults = [
   { id: 'u1', name: 'Ava Patel', score: 9, total: 10, status: 'Submitted' },
@@ -29,16 +29,24 @@ function downloadCSV(rows, filename = 'results.csv') {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function generateExamCode() {
+  const part = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `EXAM-${part}`;
+}
+
 export default function AdminPanel() {
   const [tab, setTab] = useState('create');
   const [title, setTitle] = useState('New Exam');
-  const [duration, setDuration] = useState(12);
+  const [duration, setDuration] = useState(12); // minutes
   const [maxScore, setMaxScore] = useState(10);
   const [formLink, setFormLink] = useState('');
   const [questions, setQuestions] = useState([
     { id: 'q1', type: 'mcq', question: '2 + 2 = ?', options: ['3', '4', '5'], answer: 1, score: 2 },
   ]);
   const [instructions, setInstructions] = useState('Stay focused. Full-screen enforced.');
+  const [editingId, setEditingId] = useState(null);
+  const [assignedCode, setAssignedCode] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   function addQuestion(type) {
     const id = `q${Math.random().toString(36).slice(2,7)}`;
@@ -48,13 +56,11 @@ export default function AdminPanel() {
   }
 
   function importFromGoogleForm() {
-    // Demo importer: if link matches docs.google.com/forms, we load a mocked set
     if (formLink.includes('docs.google.com/forms')) {
       setTitle(importedMock.title);
       setInstructions(importedMock.instructions);
       setQuestions(importedMock.questions);
     } else {
-      // For non-matching links, still demonstrate parsing by applying mock
       setTitle(importedMock.title + ' (Imported)');
       setQuestions(importedMock.questions);
     }
@@ -62,6 +68,32 @@ export default function AdminPanel() {
 
   function updateQuestion(id, patch) {
     setQuestions(qs => qs.map(q => q.id === id ? { ...q, ...patch } : q));
+  }
+
+  function deleteQuestion(id) {
+    setQuestions(qs => qs.filter(q => q.id !== id));
+    if (editingId === id) setEditingId(null);
+  }
+
+  function assignExam() {
+    const code = generateExamCode();
+    const exam = { code, title, duration, maxScore, instructions, questions };
+    try {
+      localStorage.setItem(`exam:${code}`, JSON.stringify(exam));
+      setAssignedCode(code);
+      setCopied(false);
+    } catch (e) {
+      console.error('Failed to save exam', e);
+      alert('Failed to assign exam in this demo environment.');
+    }
+  }
+
+  function copyCode() {
+    if (!assignedCode) return;
+    navigator.clipboard.writeText(assignedCode).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
   }
 
   const analytics = useMemo(() => {
@@ -78,6 +110,18 @@ export default function AdminPanel() {
       <div className="mt-2 mb-4 flex items-center gap-2 text-slate-700">
         <ListChecks size={18}/> <h2 className="font-semibold">Admin Control Center</h2>
       </div>
+
+      {assignedCode && (
+        <div className="mb-4 p-4 rounded-xl border border-emerald-200 bg-emerald-50 flex items-center justify-between">
+          <div>
+            <p className="text-sm text-emerald-800">Exam assigned successfully. Share this code with candidates:</p>
+            <p className="font-mono text-lg text-emerald-900">{assignedCode}</p>
+          </div>
+          <button onClick={copyCode} className={`inline-flex items-center gap-2 px-3 py-2 rounded-md ${copied ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'}`}>
+            <Copy size={16} /> {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-2 mb-4">
         <button onClick={() => setTab('create')} className={`px-3 py-1.5 rounded-md text-sm ${tab==='create' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>Create Exam</button>
@@ -112,32 +156,67 @@ export default function AdminPanel() {
                   <div key={q.id} className="p-3 rounded-lg border">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">Q{idx+1} • {q.type.toUpperCase()}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100">{q.score} pts</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100">{q.score} pts</span>
+                        {editingId === q.id ? (
+                          <>
+                            <button onClick={() => setEditingId(null)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 text-emerald-700"><Save size={14}/> Save</button>
+                            <button onClick={() => setEditingId(null)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 text-slate-700"><X size={14}/> Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => setEditingId(q.id)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-100 text-slate-700"><Pencil size={14}/> Edit</button>
+                            <button onClick={() => deleteQuestion(q.id)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded bg-red-50 text-red-700"><Trash2 size={14}/> Delete</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <input className="mt-2 w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" value={q.question} onChange={e=>updateQuestion(q.id,{question:e.target.value})} />
-                    {q.type==='mcq' && (
-                      <div className="mt-2 grid gap-2">
-                        {q.options.map((opt,i)=> (
-                          <div key={i} className="flex items-center gap-2">
-                            <input className="w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" value={opt} onChange={e=>{
-                              const opts=[...q.options]; opts[i]=e.target.value; updateQuestion(q.id,{options:opts});
-                            }} />
-                            <input type="radio" name={`ans-${q.id}`} checked={q.answer===i} onChange={()=>updateQuestion(q.id,{answer:i})} />
+
+                    {editingId === q.id ? (
+                      <div>
+                        <input className="mt-2 w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" value={q.question} onChange={e=>updateQuestion(q.id,{question:e.target.value})} />
+                        {q.type==='mcq' && (
+                          <div className="mt-2 grid gap-2">
+                            {q.options.map((opt,i)=> (
+                              <div key={i} className="flex items-center gap-2">
+                                <input className="w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" value={opt} onChange={e=>{
+                                  const opts=[...q.options]; opts[i]=e.target.value; updateQuestion(q.id,{options:opts});
+                                }} />
+                                <input type="radio" name={`ans-${q.id}`} checked={q.answer===i} onChange={()=>updateQuestion(q.id,{answer:i})} />
+                              </div>
+                            ))}
+                            <button onClick={()=>updateQuestion(q.id,{options:[...q.options,'Option']})} className="text-xs text-indigo-600">+ Add option</button>
                           </div>
-                        ))}
-                        <button onClick={()=>updateQuestion(q.id,{options:[...q.options,'Option']})} className="text-xs text-indigo-600">+ Add option</button>
+                        )}
+                        {q.type==='short' && (
+                          <input className="mt-2 w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" placeholder="Correct answer (for auto marking)" value={q.answerText||''} onChange={e=>updateQuestion(q.id,{answerText:e.target.value})} />
+                        )}
+                        {q.type==='code' && (
+                          <textarea className="mt-2 w-full font-mono text-sm rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" placeholder="Starter code" value={q.starter||''} onChange={e=>updateQuestion(q.id,{starter:e.target.value})} />
+                        )}
+                        <div className="mt-2 flex items-center gap-2">
+                          <label className="text-xs text-slate-600">Score</label>
+                          <input type="number" className="w-20 rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" value={q.score} onChange={e=>updateQuestion(q.id,{score:parseInt(e.target.value||'0')})}/>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <div className="text-sm text-slate-800">{q.question}</div>
+                        {q.type==='mcq' && (
+                          <ul className="list-disc pl-5 text-sm text-slate-600 mt-1">
+                            {q.options.map((opt,i)=> (
+                              <li key={i} className={i===q.answer? 'text-slate-900 font-medium' : ''}>{opt}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {q.type==='short' && (
+                          <div className="text-xs text-slate-500 mt-1">Answer: <span className="text-slate-700">{q.answerText || '—'}</span></div>
+                        )}
+                        {q.type==='code' && (
+                          <pre className="mt-1 text-xs bg-slate-50 p-2 rounded border overflow-x-auto"><code>{q.starter}</code></pre>
+                        )}
                       </div>
                     )}
-                    {q.type==='short' && (
-                      <input className="mt-2 w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" placeholder="Correct answer (for auto marking)" value={q.answerText||''} onChange={e=>updateQuestion(q.id,{answerText:e.target.value})} />
-                    )}
-                    {q.type==='code' && (
-                      <textarea className="mt-2 w-full font-mono text-sm rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" placeholder="Starter code" value={q.starter||''} onChange={e=>updateQuestion(q.id,{starter:e.target.value})} />
-                    )}
-                    <div className="mt-2 flex items-center gap-2">
-                      <label className="text-xs text-slate-600">Score</label>
-                      <input type="number" className="w-20 rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" value={q.score} onChange={e=>updateQuestion(q.id,{score:parseInt(e.target.value||'0')})}/>
-                    </div>
                   </div>
                 ))}
                 <div className="flex flex-wrap gap-2">
@@ -165,8 +244,14 @@ export default function AdminPanel() {
               <div className="mt-3 text-sm text-slate-700">
                 <p className="font-semibold">{title}</p>
                 <p className="text-slate-500 text-xs mt-1">{instructions}</p>
+                <p className="text-slate-500 text-xs mt-1">Duration: {duration} mins • Max Score: {maxScore}</p>
               </div>
-              <button className="mt-4 w-full px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Assign Exam</button>
+              <button onClick={assignExam} className="mt-4 w-full px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"><Send size={16} className="mr-1"/> Assign Exam</button>
+              {assignedCode && (
+                <div className="mt-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-2">
+                  Share code <span className="font-mono font-medium">{assignedCode}</span> with candidates.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -205,6 +290,7 @@ export default function AdminPanel() {
               <button className="px-3 py-2 rounded-md bg-slate-100">Pause Exam</button>
               <button className="px-3 py-2 rounded-md bg-slate-100">Resume Selected</button>
               <button className="px-3 py-2 rounded-md bg-red-600 text-white">Block Selected</button>
+              <button className="px-3 py-2 rounded-md bg-emerald-600 text-white">Force Submit Selected</button>
             </div>
           </div>
         </div>
@@ -227,6 +313,7 @@ export default function AdminPanel() {
                   <th className="text-left px-3 py-2">Score</th>
                   <th className="text-left px-3 py-2">Total</th>
                   <th className="text-left px-3 py-2">Status</th>
+                  <th className="text-left px-3 py-2">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -236,6 +323,7 @@ export default function AdminPanel() {
                     <td className="px-3 py-2 font-medium">{r.score}</td>
                     <td className="px-3 py-2">{r.total}</td>
                     <td className="px-3 py-2">{r.status}</td>
+                    <td className="px-3 py-2"><button className="text-xs px-2 py-1 rounded bg-emerald-50 text-emerald-700">Mark as Submitted</button></td>
                   </tr>
                 ))}
               </tbody>
